@@ -14,7 +14,7 @@ ShadowRecon is a fast, modular, and professional-grade reconnaissance CLI tool d
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/yourusername/shadowrecon.git
+   git clone https://github.com/rajatsec/shadowrecon.git
    cd shadowrecon
    ```
 
