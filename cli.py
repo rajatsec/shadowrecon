@@ -1,3 +1,10 @@
+import urllib3
+import warnings
+
+# Suppress InsecureRequestWarning globally
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+warnings.filterwarnings("ignore", category=urllib3.exceptions.InsecureRequestWarning)
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -44,7 +51,24 @@ def print_banner(clear: bool = True):
         else:
             os.system('clear')
 
-    banner_text = f"""
+    # Detect if running on mobile (Termux)
+    is_mobile = "TERMUX_VERSION" in os.environ
+
+    if is_mobile:
+        banner_text = f"""
+[bold red]  ___ _              _            
+ / __| |_  __ _ __| |_____ __ __
+ \__ \ ' \/ _` / _` / _ \ V  V /
+ |___/_||_\__,_\__,_\___/\_/\_/ 
+ [bold white]  ___                     
+  | _ \___ __ ___ _ _ 
+  |   / -_) _/ _ \ ' \ 
+  |_|_\___\__\___/_||_|[/]
+
+    [dim white]v{VERSION} | Built by [bold cyan]@secure_with_rajat[/][/dim white]
+    """
+    else:
+        banner_text = f"""
 [bold red]███████╗██╗  ██╗ █████╗ ██████╗  ██████╗ ██╗    ██╗██████╗ ███████╗ ██████╗ ██████╗ ███╗   ██╗
 ██╔════╝██║  ██║██╔══██╗██╔══██╗██╔═══██╗██║    ██║██╔══██╗██╔════╝██╔════╝██╔═══██╗████╗  ██║
 ███████╗███████║███████║██║  ██║██║   ██║██║ █╗ ██║██████╔╝█████╗  ██║     ██║   ██║██╔██╗ ██║
@@ -54,6 +78,7 @@ def print_banner(clear: bool = True):
 
                      [dim white]v{VERSION} | Built by [bold cyan]@secure_with_rajat[/][/dim white]
     """
+
     console.print(Align.center(Panel(banner_text, style="red", border_style="bright_red", expand=False)))
 
 def show_first_run_guide():
