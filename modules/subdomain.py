@@ -1,57 +1,66 @@
-import requests
-import json
-import re
-from typing import Set, List
-from shadowrecon.config import HACKERTARGET_URL, CRTSH_URL
+import asyncio
+import logging
+from typing import Dict, List
+
+import aiohttp
+
+from shadowrecon.providers import (
+    CrtshProvider,
+    HackertargetProvider,
+    CertspotterProvider,
+    AlienvaultProvider,
+    UrlscanProvider,
+)
+from shadowrecon.providers.base import BaseProvider
+
+logger = logging.getLogger("ShadowRecon")
+
 
 class SubdomainEnum:
-    def __init__(self, domain: str):
+    def __init__(self, domain: str, config: dict | None = None):
         self.domain = domain
-        self.subdomains: Set[str] = set()
+        cfg = config or {}
+        providers_cfg = cfg.get("providers", {})
 
-    def clean_domain(self, domain: str) -> str:
-        """Removes wildcards and protocols from a domain string."""
-        domain = domain.strip().lower()
-        domain = re.sub(r'^(\*\.)', '', domain)
-        return domain
+        self._providers: List[BaseProvider] = []
+        provider_map = {
+            "crtsh": CrtshProvider(),
+            "hackertarget": HackertargetProvider(),
+            "certspotter": CertspotterProvider(),
+            "alienvault": AlienvaultProvider(
+                api_key=providers_cfg.get("alienvault", {}).get("api_key", "")
+            ),
+            "urlscan": UrlscanProvider(
+                api_key=providers_cfg.get("urlscan", {}).get("api_key", "")
+            ),
+        }
 
-    def fetch_crtsh(self) -> Set[str]:
-        """Fetches subdomains from Certificate Transparency logs via crt.sh."""
-        results = set()
-        try:
-            url = CRTSH_URL.format(domain=self.domain)
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                for entry in data:
-                    name_value = entry.get('name_value', '')
-                    for sub in name_value.split('\n'):
-                        clean_sub = self.clean_domain(sub)
-                        if clean_sub.endswith(self.domain):
-                            results.add(clean_sub)
-        except Exception:
-            pass
-        return results
+        for name, provider in provider_map.items():
+            enabled = providers_cfg.get(name, {}).get("enabled", True)
+            if enabled:
+                self._providers.append(provider)
 
-    def fetch_hackertarget(self) -> Set[str]:
-        """Fetches subdomains via HackerTarget API."""
-        results = set()
-        try:
-            url = HACKERTARGET_URL.format(domain=self.domain)
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                for line in response.text.splitlines():
-                    if ',' in line:
-                        sub = line.split(',')[0]
-                        clean_sub = self.clean_domain(sub)
-                        if clean_sub.endswith(self.domain):
-                            results.add(clean_sub)
-        except Exception:
-            pass
-        return results
+    async def run(
+        self, session: aiohttp.ClientSession
+    ) -> Dict[str, object]:
+        tasks = {
+            p.name: p.fetch(self.domain, session) for p in self._providers
+        }
+        raw_results = await asyncio.gather(*tasks.values(), return_exceptions=True)
 
-    def run(self) -> List[str]:
-        """Executes all enumeration sources and returns a sorted list."""
-        self.subdomains.update(self.fetch_crtsh())
-        self.subdomains.update(self.fetch_hackertarget())
-        return sorted(list(self.subdomains))
+        per_provider: Dict[str, List[str]] = {}
+        all_subs: set[str] = set()
+
+        for name, result in zip(tasks.keys(), raw_results):
+            if isinstance(result, Exception):
+                logger.warning(f"Provider {name} raised: {result}")
+                per_provider[name] = []
+            else:
+                subs = sorted(result)
+                per_provider[name] = subs
+                all_subs.update(result)
+
+        return {
+            "subdomains": sorted(all_subs),
+            "per_provider": per_provider,
+        }

@@ -1,0 +1,28 @@
+providers:
+  crtsh:
+    enabled: true
+  hackertarget:
+    enabled: true
+  certspotter:
+    enabled: true
+  alienvault:
+    enabled: true
+    api_key: ""
+  urlscan:
+    enabled: true
+    api_key: ""
+
+scan:
+  threads: 100
+  timeout: 1.0
+  rate_limit: 150
+
+output:
+  directory: output
+  formats:
+    - json
+    - txt
+    - html
+
+db:
+  path: shadowrecon.db
