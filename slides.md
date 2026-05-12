@@ -34,12 +34,22 @@
 - Accent 2: #FF2222 (blood red for dramatic effect)
 - Glow effects: #0066FF with blur/bloom
 
-### Canva Generation Settings
-- **Design type**: `your_story` (9:16 portrait) OR `presentation` then export portrait
-- **Style keyword**: "dark cosmic blue glowing particles cyberpunk hacker aesthetic"
-- **Background**: Dark/black with blue bioluminescent particles and organic elements
-- **Font style**: Ultra bold heavy condensed white text
-- **Mood**: Dramatic, cinematic, mysterious, powerful
+### PRIMARY STYLE (Red Grunge Horror — Main Style)
+- **Background**: Pure black #000000
+- **Edge texture**: Dark red blood splatter / paint grunge on ALL 4 edges (looks like digital corruption or blood spray)
+- **Title font**: Giant bold italic distressed/grunge red font — takes up top 40-60% of slide
+- **Body font**: Regular white sans-serif, bullet points with • dots
+- **Cover**: Multicolor title (lime green + white + purple/violet lines) + AI dark creature/villain artwork left side
+- **Accent color**: Bright red (#FF0000) for titles, lime green (#AAFF00) + purple (#CC44FF) for cover accents
+- **Watermark**: @secure_with_rajat bottom center, small white
+- **Mood**: Urgent, breaking news, horror cyberpunk, dramatic
+- **Canva style keyword**: "pure black background dark red blood splatter grunge edges giant bold italic red distressed horror font white body text dramatic urgent cyberpunk breaking news"
+
+### SECONDARY STYLE (Blue Cosmic — Alternative)
+- **Background**: Very dark navy #050A14
+- **Overlay**: Blue glowing bioluminescent particles, flowers, stars, crescent moon
+- **Font**: Ultra bold white Impact/Bebas condensed
+- **Mood**: Cinematic, mysterious, atmospheric
 
 ## Slide Structure Template (for any tool/project)
 
