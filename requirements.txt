@@ -1,3 +1,4 @@
+# --- Core (required) ---
 typer[all]
 rich
 aiohttp
@@ -6,3 +7,14 @@ dnspython
 pyyaml
 aiosqlite
 jinja2
+
+# --- Optional: OSINT / media modules (graceful-skip if absent) ---
+phonenumbers        # phone number OSINT
+Pillow              # image EXIF / properties
+pypdf               # PDF document metadata
+mmh3                # Shodan-compatible favicon hash
+
+# --- Optional: richer output / analysis (uncomment to enable) ---
+# pytesseract       # image OCR (also needs the tesseract binary)
+# weasyprint        # PDF report export
+# cryptography      # richer SSL certificate parsing

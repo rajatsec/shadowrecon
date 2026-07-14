@@ -1,3 +1,8 @@
+# ============================================================
+#  ShadowRecon configuration
+# ============================================================
+
+# Passive subdomain providers
 providers:
   crtsh:
     enabled: true
@@ -12,17 +17,44 @@ providers:
     enabled: true
     api_key: ""
 
+# Port scan tuning
 scan:
   threads: 100
   timeout: 1.0
-  rate_limit: 150
 
+# Subdomain / web module tuning
+subdomain:
+  wordlist: []          # custom active-bruteforce wordlist (empty = built-in)
+web:
+  dir_wordlist: []      # custom directory-discovery wordlist (empty = built-in)
+
+# OSINT module settings
+osint:
+  phone_default_region: "IN"   # region assumed for numbers without a + country code
+
+# External API integrations (all optional; modules skip gracefully without keys)
+integrations:
+  shodan:
+    api_key: ""
+  virustotal:
+    api_key: ""
+  securitytrails:
+    api_key: ""
+  numverify:
+    api_key: ""
+  ai:
+    provider: ""        # "anthropic" | "openai" | "" (empty = local heuristic summary)
+    api_key: ""
+
+# Reporting
 output:
   directory: output
   formats:
     - json
-    - txt
+    - csv
     - html
+    # - pdf            # needs weasyprint (optional)
 
+# Scan history database
 db:
   path: shadowrecon.db

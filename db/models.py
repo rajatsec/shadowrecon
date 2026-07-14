@@ -12,4 +12,3 @@ class ScanRecord:
     http: Dict[str, Any] = field(default_factory=dict)
     open_ports: Dict[int, Dict[str, Any]] = field(default_factory=dict)
     takeovers: List[Dict[str, Any]] = field(default_factory=list)
-    scan_id: int = 0

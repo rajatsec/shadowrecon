@@ -2,8 +2,9 @@
 import os
 
 PROJECT_NAME = "ShadowRecon"
-VERSION = "1.1.0"
+VERSION = "2.0.0"
 AUTHOR = "Rajat (@secure_with_rajat)"
+TAGLINE = "Enterprise OSINT & Reconnaissance Platform"
 
 # API Endpoints for Subdomain Enumeration
 HACKERTARGET_URL = "https://api.hackertarget.com/hostsearch/?q={domain}"

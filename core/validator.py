@@ -51,6 +51,24 @@ def validate_ports(ports_str: str | None, default: List[int] | None = None) -> L
     return sorted(set(port_list))
 
 
+_VALID_PROVIDERS = {"crtsh", "hackertarget", "certspotter", "alienvault", "urlscan"}
+
+
+def validate_providers(providers_str: str | None) -> List[str] | None:
+    if not providers_str:
+        return None
+    names = [p.strip().lower() for p in providers_str.split(",") if p.strip()]
+    if not names:
+        return None
+    invalid = [p for p in names if p not in _VALID_PROVIDERS]
+    if invalid:
+        raise ValueError(
+            f"Unknown provider(s): {', '.join(invalid)}. "
+            f"Valid: {', '.join(sorted(_VALID_PROVIDERS))}"
+        )
+    return names
+
+
 def validate_threads(value: int) -> int:
     if not (1 <= value <= 1000):
         raise ValueError(f"Threads must be between 1 and 1000, got {value}.")

@@ -15,7 +15,8 @@ class CrtshProvider(BaseProvider):
         url = self._URL.format(domain=domain)
 
         async def _get():
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            # crt.sh is frequently slow (20-50s); use a generous timeout.
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=40)) as resp:
                 if resp.status != 200:
                     return set()
                 data = await resp.json(content_type=None)

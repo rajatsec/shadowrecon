@@ -3,29 +3,39 @@ import logging
 from typing import Dict, List
 
 import aiodns
-import dns.resolver
 
 logger = logging.getLogger("ShadowRecon")
 
-_RECORD_TYPES = ["A", "MX", "NS", "TXT", "CNAME"]
+_RECORD_TYPES = ["A", "AAAA", "MX", "NS", "TXT", "CNAME", "SOA"]
 
 
 class DNSEnum:
     def __init__(self, domain: str):
         self.domain = domain
 
+    @staticmethod
+    def _clean(records: List[str]) -> List[str]:
+        # Drop empty values and the bare "." returned for null MX records.
+        return [r for r in records if r and r != "."]
+
     async def _query(self, resolver: aiodns.DNSResolver, rtype: str) -> List[str]:
         try:
             answers = await resolver.query(self.domain, rtype)
-            if rtype == "MX":
-                return [str(r.host) for r in answers]
-            elif rtype in ("NS", "CNAME"):
-                return [str(r.host) for r in answers]
-            elif rtype == "TXT":
-                return [" ".join(r.text.decode() if isinstance(r.text, bytes) else r.text
-                                 for r in [ans]) for ans in answers]
+            if rtype == "TXT":
+                records = [
+                    ans.text.decode() if isinstance(ans.text, bytes) else ans.text
+                    for ans in answers
+                ]
+            elif rtype == "SOA":
+                # SOA returns a single result object, not an iterable of hosts.
+                nsname = getattr(answers, "nsname", "")
+                hostmaster = getattr(answers, "hostmaster", "")
+                serial = getattr(answers, "serial", "")
+                records = [f"{nsname} {hostmaster} serial={serial}".strip()]
             else:
-                return [str(r.host) for r in answers]
+                # A/AAAA/NS/CNAME/MX all expose the value via .host
+                records = [str(r.host) for r in answers]
+            return self._clean(records)
         except aiodns.error.DNSError:
             return []
         except Exception as e:

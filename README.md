@@ -1,59 +1,156 @@
 # ShadowRecon 🛡️
 
-ShadowRecon is a fast, modular, and professional-grade reconnaissance CLI tool designed for red teaming and security research. It automates subdomain enumeration and port scanning with high-fidelity terminal output.
+**ShadowRecon v2.0 — Enterprise OSINT & Reconnaissance Platform.**
 
-## Features
+An extensible, fully-async, all-in-one recon platform. Point it at a domain, IP,
+phone number, username, image or document and it runs a suite of **29 modules**
+across network, web, subdomain, cloud, OSINT, media, threat-intel and AI-analysis
+categories — then produces JSON / CSV and an interactive HTML dashboard with a
+risk score and an AI-generated summary.
 
-- **Subdomain Enumeration**: Fetches data from `crt.sh` and `HackerTarget`.
-- **Multi-threaded Port Scanning**: High-performance scanning using Python's `ThreadPoolExecutor`.
-- **Structured Output**: Saves results in both `JSON` and `TXT` formats.
-- **Hacker-style UI**: Built with `typer` and `rich` for a clean, professional terminal experience.
-- **Logging**: Automatic logging of all activities and errors.
+> For **authorized security testing, CTFs and research only.** Public data sources
+> and non-intrusive checks by default; intrusive modules are strictly opt-in.
 
-## Installation
+---
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/rajatsec/shadowrecon.git
-   cd shadowrecon
-   ```
+## ✨ What's inside
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r shadowrecon/requirements.txt
-   ```
+| Category | Modules |
+|----------|---------|
+| 🌐 **Network** | `dns` (A/AAAA/MX/NS/TXT/CNAME/SOA), `whois`, `reverse_dns`, `asn` (Team Cymru), `ip_intel` (geo/ISP/reverse-IP), `ports` (+ optional nmap OS fingerprint) |
+| 🔎 **Subdomain** | `subdomains_passive` (crt.sh, hackertarget, certspotter, alienvault, urlscan), `subdomains_active` (DNS brute-force), `wildcard` detection |
+| 🌍 **Web** | `http` (headers/cookies/redirect chain), `ssl` (cert/issuer/expiry/TLS versions), `waf` (CDN/WAF detect), `tech` (CMS/framework/analytics), `robots_sitemap`, `favicon` (Shodan hash), `dirs` (dir/file discovery), `js` (endpoints + secret detection), `takeover` |
+| ☁️ **Cloud** | `cloud` — S3 / GCS / Azure bucket discovery + CDN/provider ID |
+| 📱 **OSINT** | `email` (harvest + SPF/DMARC), `username` (14 public platforms), `phone` (validation/carrier/region/line-type/timezone) |
+| 🖼️ **Media** | `image` (EXIF/GPS/properties/OCR), `document` (PDF/DOCX/PPTX/XLSX metadata) |
+| 🛰️ **Threat-Intel** | `shodan`, `virustotal`, `securitytrails` *(optional, API key)* |
+| 🤖 **Analysis** | `risk` (heuristic score + graded issues), `ai_summary` (LLM or local heuristic) |
 
-3. **(Optional) Set up Python path**:
-   If you are running from the root directory:
-   ```bash
-   export PYTHONPATH=$PYTHONPATH:$(pwd)
-   ```
+Run `shadowrecon modules` to see the live list.
 
-## Usage
+---
 
-### Basic Scan
-Perform a subdomain enumeration and scan top 20 common ports:
+## 🚀 Install
+
 ```bash
-python3 shadowrecon/main.py scan -d example.com
+git clone https://github.com/rajatsec/shadowrecon.git
+cd shadowrecon
+pip install -r shadowrecon/requirements.txt      # core deps
 ```
 
-### Advanced Scan
-Scan specific ports with custom threads and timeout:
+Optional modules activate automatically when their (optional) dependency is
+present — `phonenumbers`, `Pillow`, `pypdf`, `mmh3` are in requirements; OCR
+(`pytesseract`), PDF export (`weasyprint`) and richer SSL (`cryptography`) are
+commented out — uncomment to enable. Modules whose deps are missing **skip
+gracefully** instead of failing.
+
+A convenience launcher is included:
+
 ```bash
-python3 shadowrecon/main.py scan -d example.com -p 80,443,8080,22 -t 200 -to 0.5
+./recon                 # interactive shell
+./recon scan example.com --full
 ```
 
-### Options
-- `-d, --domain`: Target domain (Required)
-- `-t, --threads`: Number of concurrent threads (Default: 100)
-- `-to, --timeout`: Timeout for port scanning in seconds (Default: 1.0)
-- `-p, --ports`: Comma-separated list of ports to scan
-- `-o, --output`: Directory to save results (Default: `output`)
+---
 
-## Output
-Results are saved in the `output/` directory:
-- `domain_timestamp.json`: Full structured data.
-- `domain_timestamp.txt`: Human-readable summary.
+## 🧭 Usage
 
-## Disclaimer
-This tool is for educational and ethical security testing purposes only. Use it only on targets you have explicit permission to test.
+### Interactive shell
+```bash
+python3 shadowrecon/main.py
+```
+```
+scan example.com                 # full domain recon (+ AI summary & risk)
+scan -d example.com --full       # every module (intrusive-ish)
+scan -d example.com --modules dns,ssl,waf,tech
+scan -d example.com --exclude dirs,js
+phone +14155552671               # phone OSINT
+username torvalds                # username across public platforms
+image ~/photo.jpg                # EXIF / GPS / OCR
+doc ~/report.pdf                 # document metadata
+history example.com              # past scans
+compare 1 2                      # diff two scans
+modules                          # list all modules
+manual                           # full help
+```
+
+### One-off commands
+```bash
+python3 shadowrecon/main.py scan -d example.com --full
+python3 shadowrecon/main.py phone +14155552671
+python3 shadowrecon/main.py username torvalds
+python3 shadowrecon/main.py image ./pic.jpg
+python3 shadowrecon/main.py doc ./file.pdf
+python3 shadowrecon/main.py modules
+```
+
+### Scan flags
+| Flag | Meaning |
+|------|---------|
+| `-d, --domain` | Target domain / IP |
+| `-p, --ports` | `22,80,443` or `1-1000` |
+| `-t, --threads` | Concurrent workers (default 100) |
+| `-to, --timeout` | Port timeout seconds (default 1.0) |
+| `-o, --output` | Output directory (default `output`) |
+| `--modules` | Only run these modules |
+| `--exclude` | Skip these modules |
+| `--full` | Enable **every** module |
+| `--providers` | Passive subdomain provider subset |
+| `--os` | OS fingerprint (needs `nmap` + privileges) |
+
+---
+
+## 🧱 Architecture
+
+```
+shadowrecon/
+├── main.py / recon / cli.py     # entry points + rich CLI & interactive shell
+├── core/
+│   ├── base_module.py           # BaseModule interface + ModuleContext + ModuleResult
+│   ├── registry.py              # module registry (single source of truth)
+│   ├── engine.py                # RegistryEngine — runs modules phase-by-phase
+│   ├── pipeline.py, validator.py
+├── modules/
+│   ├── network/  subdomain/  web/  cloud/  osint/  intel/  analysis/
+│   └── (legacy dns_enum, portscan, fingerprint, http_probe, takeover, subdomain_enum)
+├── providers/                   # passive subdomain sources
+├── db/                          # SQLite scan history + diff
+└── utils/                       # report generator, netutil, logger, retry
+```
+
+**Extending it is one class + one line:** subclass `BaseModule`, set `name` /
+`category` / `target_types`, implement `async run(ctx)`, and register it. The
+engine runs modules grouped by phase, shares one `ModuleContext` so later
+modules build on earlier findings, and isolates failures so one bad module never
+takes down a scan.
+
+---
+
+## 📊 Output & reporting
+
+Every scan writes to `output/`:
+- **JSON** — full structured findings + per-module status/timing
+- **CSV** — flattened findings for spreadsheets / pipelines
+- **HTML** — interactive dashboard with summary cards, risk grade, AI summary,
+  graded issues and per-module sections
+- **PDF** — optional (`weasyprint`)
+
+Domain/IP scans are also saved to a **SQLite history** DB so you can `history`
+and `compare` scans to track attack-surface changes over time.
+
+---
+
+## 🔌 Optional API integrations
+
+Add keys in `config.yaml` under `integrations:` to enable them (all optional):
+Shodan, VirusTotal, SecurityTrails, NumVerify (phone enrichment), and an AI
+provider (`anthropic` / `openai`) for LLM-written summaries. Without an AI key,
+ShadowRecon falls back to a fully-local heuristic summary.
+
+---
+
+## ⚖️ Disclaimer
+
+This tool is for **educational and authorized security testing only**. Only use
+it against targets you have explicit permission to assess. OSINT modules query
+**public** data sources only.
