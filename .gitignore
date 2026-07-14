@@ -6,3 +6,6 @@ output/
 .vscode/
 .idea/
 *.log
+venv/
+*.db
+.shadowrecon_init

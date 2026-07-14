@@ -17,10 +17,18 @@ logger = logging.getLogger("ShadowRecon")
 
 
 class SubdomainEnum:
-    def __init__(self, domain: str, config: dict | None = None):
+    def __init__(
+        self,
+        domain: str,
+        config: dict | None = None,
+        selected: List[str] | None = None,
+    ):
         self.domain = domain
         cfg = config or {}
         providers_cfg = cfg.get("providers", {})
+
+        # Optional user-supplied filter (e.g. --providers crtsh,urlscan).
+        selected_set = {s.strip().lower() for s in selected} if selected else None
 
         self._providers: List[BaseProvider] = []
         provider_map = {
@@ -36,9 +44,18 @@ class SubdomainEnum:
         }
 
         for name, provider in provider_map.items():
-            enabled = providers_cfg.get(name, {}).get("enabled", True)
-            if enabled:
-                self._providers.append(provider)
+            if selected_set is not None:
+                if name not in selected_set:
+                    continue
+            else:
+                enabled = providers_cfg.get(name, {}).get("enabled", True)
+                if not enabled:
+                    continue
+            self._providers.append(provider)
+
+    @staticmethod
+    def available_providers() -> List[str]:
+        return ["crtsh", "hackertarget", "certspotter", "alienvault", "urlscan"]
 
     async def run(
         self, session: aiohttp.ClientSession

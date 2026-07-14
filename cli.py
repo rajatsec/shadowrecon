@@ -9,7 +9,7 @@ import typer
 import yaml
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.panel import Panel
 from rich.align import Align
 from rich.markdown import Markdown
@@ -21,25 +21,33 @@ except ImportError:
     readline = None
 
 from shadowrecon.config import (
-    PROJECT_NAME, VERSION, BANNER_STYLE, SUCCESS_STYLE,
+    PROJECT_NAME, VERSION, TAGLINE, BANNER_STYLE, SUCCESS_STYLE,
     ERROR_STYLE, INFO_STYLE, HIGHLIGHT_STYLE, PANEL_STYLE,
     TOP_1000_PORTS, INIT_FILE,
 )
-from shadowrecon.core.engine import ScanEngine
-from shadowrecon.core.validator import validate_domain, validate_ports, validate_threads, validate_timeout
+from shadowrecon.core.engine import RegistryEngine
+from shadowrecon.core.registry import load_all_modules, registry
+from shadowrecon.core.validator import (
+    validate_domain, validate_ports, validate_threads, validate_timeout, validate_providers,
+)
 from shadowrecon.db.models import ScanRecord
 from shadowrecon.db.storage import ScanDB
 from shadowrecon.utils.logger import logger
-from shadowrecon.utils.output import OutputHandler
+from shadowrecon.utils.report import build_report
 
 app = typer.Typer(
-    help=f"{PROJECT_NAME} - Professional Recon Framework",
+    help=f"{PROJECT_NAME} - {TAGLINE}",
     no_args_is_help=False,
     rich_markup_mode="rich",
 )
 console = Console()
 
 _DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
+
+_CATEGORY_ICON = {
+    "network": "🌐", "subdomain": "🔎", "web": "🌍", "cloud": "☁️",
+    "osint": "📱", "media": "🖼️", "intel": "🛰️", "analysis": "🤖",
+}
 
 
 def load_config(path: str = _DEFAULT_CONFIG_PATH) -> dict:
@@ -57,8 +65,8 @@ def print_banner(clear: bool = True):
     if clear:
         os.system("cls" if os.name == "nt" else "clear")
 
-    is_mobile = "TERMUX_VERSION" in os.environ
-    if is_mobile:
+    use_compact = "TERMUX_VERSION" in os.environ or console.width < 100
+    if use_compact:
         banner_text = f"""
 [bold red]  ___ _              _
  / __| |_  __ _ __| |_____ __ __
@@ -70,7 +78,8 @@ def print_banner(clear: bool = True):
   |_|_\\___\\\\__\\\\___/| .__/
                     |_|[/]
 
-    [dim white]v{VERSION} | Built by [bold cyan]@secure_with_rajat[/][/dim white]
+    [dim white]v{VERSION} | {TAGLINE}
+    Built by [bold cyan]@secure_with_rajat[/][/dim white]
     """
     else:
         banner_text = f"""
@@ -81,7 +90,7 @@ def print_banner(clear: bool = True):
 ███████║██║  ██║██║  ██║██████╔╝╚██████╔╝╚███╔███╔╝██║  ██║███████╗╚██████╗╚██████╔╝██║ ╚████║
 ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝[/]
 
-              [dim white]v{VERSION} | Built by [bold cyan]@secure_with_rajat[/] | Async Engine | 5 Providers[/dim white]
+           [dim white]v{VERSION} | {TAGLINE} | Built by [bold cyan]@secure_with_rajat[/][/dim white]
     """
 
     console.print(Align.center(Panel(banner_text, style="red", border_style="bright_red", expand=False)))
@@ -91,12 +100,18 @@ def show_first_run_guide():
     guide = f"""
 # Welcome to {PROJECT_NAME} v{VERSION}
 
-**Async engine** — parallel scanning, 5 subdomain providers, takeover detection.
+**{TAGLINE}** — a modular platform: {len(load_all_modules().names())} recon modules across
+network, web, subdomain, cloud, OSINT, media, threat-intel and AI analysis.
 
 - Interactive mode: just run the tool and type commands
-- Commands: `scan google.com`, `history google.com`, `manual`, `exit`
-- Flags: `scan -d target.com --takeover --html`
-    """
+- `scan example.com`     full domain recon (+ AI summary & risk score)
+- `phone +14155552671`   phone number OSINT
+- `username johndoe`     username across public platforms
+- `image ./photo.jpg`    image EXIF / GPS / OCR
+- `doc ./file.pdf`       document metadata
+- `modules`              list every available module
+- `manual`               full help
+"""
     console.print(Panel(Markdown(guide), title="[bold green]Initialized[/]", border_style="green"))
     with open(INIT_FILE, "w") as f:
         f.write(str(time.time()))
@@ -104,201 +119,309 @@ def show_first_run_guide():
 
 def print_manual():
     content = f"""
-[bold cyan]{PROJECT_NAME} v{VERSION} — User Manual[/]
+[bold cyan]{PROJECT_NAME} v{VERSION} — {TAGLINE}[/]
 
-[bold yellow]COMMANDS[/]
-[green]scan[/]         Full recon scan (async, multi-provider)
-[green]history[/]      View past scans for a domain
-[green]manual[/]       Show this manual
-[green]clear[/]        Clear screen
-[green]exit[/]         Quit
+[bold yellow]TARGET COMMANDS[/]
+[green]scan[/]        Full domain / IP reconnaissance
+[green]phone[/]       Phone number OSINT (validation, carrier, region, line type)
+[green]username[/]    Username presence across public platforms
+[green]image[/]       Image OSINT (EXIF, GPS, properties, OCR)
+[green]doc[/]         Document metadata (PDF / DOCX / PPTX / XLSX)
+
+[bold yellow]DATA COMMANDS[/]
+[green]history[/]     View past scans for a target
+[green]compare[/]     Diff two past scans by ID (compare <id1> <id2>)
+[green]modules[/]     List all available modules by category
+[green]manual[/]      Show this manual   [green]clear[/]  Clear   [green]exit[/]  Quit
 
 [bold yellow]SCAN FLAGS[/]
-[blue]-d, --domain[/]     Target domain
-[blue]-f, --file[/]       File with list of domains (one per line)
-[blue]-p, --ports[/]      Ports: e.g. [dim]22,80,443[/dim] or [dim]1-1000[/dim]
-[blue]-t, --threads[/]    Concurrent workers (default 100)
-[blue]-to, --timeout[/]   Timeout in seconds (default 1.0)
-[blue]-o, --output[/]     Output directory (default [dim]output[/dim])
-[blue]--takeover[/]        Enable subdomain takeover detection
-[blue]--html[/]            Save HTML report (in addition to JSON/TXT)
-[blue]--providers[/]       Comma-separated provider list (crtsh,hackertarget,certspotter,alienvault,urlscan)
+[blue]-d, --domain[/]    Target domain / IP
+[blue]-p, --ports[/]     Ports: 22,80,443 or 1-1000
+[blue]-t, --threads[/]   Concurrent workers (default 100)
+[blue]-to, --timeout[/]  Port timeout seconds (default 1.0)
+[blue]-o, --output[/]    Output directory (default output)
+[blue]--modules[/]       Only run these modules (comma-separated)
+[blue]--exclude[/]       Skip these modules
+[blue]--full[/]          Enable every module (active brute-force, dirs, JS, cloud, takeover)
+[blue]--providers[/]     Passive subdomain providers subset
+[blue]--os[/]            OS fingerprint (needs nmap + privileges)
 
 [bold yellow]EXAMPLES[/]
-[dim]Basic scan[/dim]
-[white]shadowrecon > scan -d example.com[/]
+[white]scan example.com[/]                        default modules + AI summary
+[white]scan -d example.com --full[/]              everything (intrusive-ish)
+[white]scan -d example.com --modules dns,ssl,waf,tech[/]
+[white]scan -d example.com --exclude dirs,js[/]
+[white]phone +14155552671[/]      [white]username torvalds[/]
+[white]image ~/pic.jpg[/]         [white]doc ~/report.pdf[/]
 
-[dim]Full scan with takeover detection and HTML report[/dim]
-[white]shadowrecon > scan -d example.com --takeover --html[/]
-
-[dim]Batch scan[/dim]
-[white]shadowrecon > scan -f targets.txt -p 80,443,8080[/]
-
-[dim]View scan history[/dim]
-[white]shadowrecon > history example.com[/]
+[dim]Optional API keys (Shodan / VirusTotal / SecurityTrails / AI) go in config.yaml.[/]
     """
     console.print(Panel(content, title="[bold red]Documentation[/]", border_style="cyan"))
 
 
-def _display_results(results: dict, domain: str):
-    """Print rich-formatted tables for scan results."""
-    # DNS
-    if results.get("dns"):
-        dns_table = Table(
-            title=f"DNS Records — {domain}",
-            header_style="bold magenta",
-            border_style="dim",
-        )
-        dns_table.add_column("Type", style="cyan", width=8)
-        dns_table.add_column("Records")
-        for rtype, records in results["dns"].items():
-            dns_table.add_row(rtype, "\n".join(records))
-        console.print(dns_table)
+def _show_modules():
+    load_all_modules()
+    summary = registry.summary()
+    table = Table(title=f"{PROJECT_NAME} Modules ({len(registry.names())})",
+                  header_style="bold magenta", border_style="dim")
+    table.add_column("Category", style="cyan")
+    table.add_column("Module", style="green")
+    table.add_column("Default", justify="center")
+    table.add_column("Description", style="dim")
+    order = ["network", "subdomain", "web", "cloud", "intel", "osint", "media", "analysis"]
+    for cat in order:
+        for name in summary.get(cat, []):
+            m = registry.get(name)
+            icon = _CATEGORY_ICON.get(cat, "")
+            default = "[green]✓[/]" if m.default_enabled else "[dim]opt[/]"
+            table.add_row(f"{icon} {cat}", name, default, m.description)
+    console.print(table)
 
-    # HTTP summary
-    http = results.get("http", {})
+
+# ------------------------- result display -------------------------
+
+def _kv_table(title: str, data: dict):
+    t = Table(title=title, header_style="bold magenta", border_style="dim")
+    t.add_column("Field", style="cyan")
+    t.add_column("Value")
+    for k, v in data.items():
+        if isinstance(v, (dict, list)):
+            import json as _j
+            v = _j.dumps(v, default=str)
+        t.add_row(str(k), str(v))
+    console.print(t)
+
+
+def _display_osint(ttype: str, f: dict):
+    if ttype == "phone":
+        d = f.get("phone", {})
+        if not d:
+            console.print(f"[{ERROR_STYLE}]No phone data.[/]"); return
+        base = {k: d[k] for k in ("input", "valid", "region", "location", "carrier",
+                                  "line_type", "country_code") if k in d}
+        _kv_table("📱 Phone OSINT", base)
+        if d.get("timezones"):
+            console.print(f"  [bold]Timezones:[/] {', '.join(d['timezones'])}")
+        if d.get("formats"):
+            console.print("  [bold]Formats:[/] " + "  ".join(f"[dim]{k}:[/] {v}" for k, v in d["formats"].items()))
+    elif ttype == "username":
+        d = f.get("username", {})
+        found = d.get("found_on", [])
+        console.print(f"\n[bold green]Found '{d.get('username','')}' on {len(found)} platform(s):[/]")
+        for p in found:
+            console.print(f"  [green]✓[/] {p}: [dim]{d['results'][p]['url']}[/]")
+    elif ttype == "image":
+        d = f.get("image", {})
+        _kv_table("🖼️ Image OSINT", {k: d[k] for k in ("file", "size_bytes", "md5") if k in d})
+        if d.get("properties"):
+            _kv_table("Properties", d["properties"])
+        if d.get("exif"):
+            _kv_table("EXIF", d["exif"])
+        if d.get("gps"):
+            console.print(f"  [bold red]GPS:[/] {d['gps'].get('latitude')}, {d['gps'].get('longitude')} "
+                          f"→ [cyan]{d['gps'].get('maps_url')}[/]")
+        if d.get("ocr_text"):
+            console.print(Panel(d["ocr_text"][:500], title="OCR Text", border_style="dim"))
+    elif ttype == "document":
+        d = f.get("document", {})
+        _kv_table("📄 Document OSINT", {k: d[k] for k in ("file", "size_bytes", "md5") if k in d})
+        if d.get("pdf"):
+            _kv_table("PDF Metadata", d["pdf"].get("metadata", {}) or {"pages": d["pdf"].get("pages")})
+        if d.get("office"):
+            _kv_table("Office Metadata", d["office"])
+        if d.get("embedded_links"):
+            console.print(f"  [bold]Embedded links:[/] {len(d['embedded_links'])}")
+
+
+def _display(result: dict):
+    f = result.get("findings", {})
+    rep = result.get("report", {})
+    target = result.get("target", "")
+
+    # Module run summary
+    mods = result.get("modules", {})
+    ok = sum(1 for m in mods.values() if m["status"] == "ok")
+    console.print(f"\n[bold]Modules:[/] {ok}/{len(mods)} produced data")
+
+    # OSINT / media targets: render their dedicated findings
+    ttype = result.get("target_type")
+    if ttype in ("phone", "username", "image", "document"):
+        _display_osint(ttype, f)
+        ai = rep.get("ai_summary", {})
+        if ai.get("summary"):
+            console.print(Panel(ai["summary"], title=f"[bold cyan]AI Summary ({ai.get('engine','')})[/]",
+                                border_style="cyan"))
+        return
+
+    # DNS
+    dns = rep.get("dns", {})
+    if dns:
+        t = Table(title=f"DNS — {target}", header_style="bold magenta", border_style="dim")
+        t.add_column("Type", style="cyan", width=8)
+        t.add_column("Records")
+        for rtype, records in dns.items():
+            t.add_row(rtype, "\n".join(records))
+        console.print(t)
+
+    # Network intel
+    asn = f.get("asn", {}).get("asn", {})
+    geo = f.get("ip_intel", {}).get("geo", {})
+    if asn or geo:
+        for ip in set(list(asn.keys()) + list(geo.keys())):
+            a = asn.get(ip, {}); g = geo.get(ip, {})
+            console.print(f"  [cyan]{ip}[/]  "
+                          f"AS{a.get('asn','?')} [yellow]{a.get('as_name','')}[/]  "
+                          f"{g.get('city','')} {g.get('country','')} [dim]{g.get('isp','')}[/]")
+
+    # HTTP
+    http = rep.get("http", {})
     if http:
         found = len(http.get("found_headers", {}))
-        missing = len(http.get("missing_headers", []))
-        total = found + missing
-        score_style = "green" if found >= 7 else ("yellow" if found >= 4 else "red")
-        console.print(
-            f"\n[bold]HTTP[/] {http.get('url', '')}  "
-            f"Status: [cyan]{http.get('status_code', '-')}[/]  "
-            f"Server: [yellow]{http.get('server', '-')}[/]  "
-            f"Headers: [{score_style}]{found}/{total}[/]"
-        )
-        if http.get("title"):
-            console.print(f"  Title: [dim]{http['title']}[/]")
-        if http.get("cookie_issues"):
-            for ci in http["cookie_issues"]:
-                console.print(f"  [yellow][!] {ci}[/]")
+        total = found + len(http.get("missing_headers", []))
+        style = "green" if found >= 7 else ("yellow" if found >= 4 else "red")
+        console.print(f"\n[bold]HTTP[/] {http.get('url','')}  Status: [cyan]{http.get('status_code','-')}[/]  "
+                      f"Server: [yellow]{http.get('server','-')}[/]  Headers: [{style}]{found}/{total}[/]")
+
+    # SSL
+    ssl = f.get("ssl", {})
+    if ssl and ssl.get("issuer_cn"):
+        console.print(f"[bold]SSL[/] Issuer: [yellow]{ssl.get('issuer_cn')}[/]  "
+                      f"Expires in: [cyan]{ssl.get('days_until_expiry')}[/] days  "
+                      f"Trusted: {'[green]yes[/]' if ssl.get('trusted') else '[red]no[/]'}")
+
+    # WAF / Tech
+    waf = f.get("waf", {}).get("detected", [])
+    if waf:
+        console.print(f"[bold]WAF/CDN:[/] [magenta]{', '.join(waf)}[/]")
+    tech = f.get("tech", {})
+    if tech:
+        flat = [x for v in tech.values() for x in (v if isinstance(v, list) else [v])]
+        if flat:
+            console.print(f"[bold]Tech:[/] [purple]{', '.join(flat)}[/]")
 
     # Ports
-    ports = results.get("open_ports", {})
+    ports = rep.get("open_ports", {})
     if ports:
-        port_table = Table(
-            title=f"Open Ports — {domain}",
-            style=INFO_STYLE,
-            border_style="red",
-        )
-        port_table.add_column("Port", justify="right", style="cyan", width=7)
-        port_table.add_column("Service", style="magenta", width=12)
-        port_table.add_column("Tech", style="purple")
-        port_table.add_column("Banner", style="yellow")
+        t = Table(title=f"Open Ports — {target}", border_style="red")
+        t.add_column("Port", justify="right", style="cyan")
+        t.add_column("Service", style="magenta")
+        t.add_column("Tech", style="purple")
+        t.add_column("Banner", style="yellow")
         for port, info in ports.items():
-            tech = ", ".join(info.get("tech", [])) or "-"
-            port_table.add_row(
-                str(port),
-                info.get("service", "unknown"),
-                tech,
-                (info.get("banner") or "-")[:80],
-            )
-        console.print(port_table)
-    else:
-        console.print(f"[{ERROR_STYLE}]![/] No open ports found.")
+            t.add_row(str(port), info.get("service", "unknown"),
+                      ", ".join(info.get("tech", [])) or "-", (info.get("banner") or "-")[:70])
+        console.print(t)
 
-    # Subdomains summary
-    subs = results.get("subdomains", [])
-    per_prov = results.get("per_provider", {})
+    # Subdomains
+    subs = rep.get("subdomains", [])
     if subs:
         console.print(f"\n[bold green]Subdomains:[/] {len(subs)} found")
-        if per_prov:
-            chips = "  ".join(
-                f"[dim]{name}:[/][cyan]{len(s)}[/]" for name, s in per_prov.items() if s
-            )
-            console.print(f"  {chips}")
+        pp = rep.get("per_provider", {})
+        if pp:
+            console.print("  " + "  ".join(f"[dim]{n}:[/][cyan]{len(s)}[/]" for n, s in pp.items() if s))
 
     # Takeovers
-    takeovers = results.get("takeovers", [])
-    if takeovers:
-        console.print(f"\n[bold red]TAKEOVER RISKS ({len(takeovers)}):[/]")
-        for t in takeovers:
-            console.print(
-                f"  [red][VULNERABLE][/] {t['subdomain']} → {t['cname']} "
-                f"([yellow]{t['service']}[/])"
-            )
+    tk = rep.get("takeovers", [])
+    if tk:
+        console.print(f"\n[bold red]TAKEOVER RISKS ({len(tk)}):[/]")
+        for t_ in tk:
+            console.print(f"  [red][VULNERABLE][/] {t_['subdomain']} → {t_['cname']} ([yellow]{t_['service']}[/])")
+
+    # Risk + AI
+    risk = rep.get("risk", {})
+    if risk:
+        g = risk.get("grade", "-")
+        gstyle = {"A": "green", "B": "green", "C": "yellow", "D": "yellow", "F": "red"}.get(g, "white")
+        console.print(f"\n[bold]Risk Score:[/] [{gstyle}]{risk.get('risk_score')}/100  (grade {g})[/]  "
+                      f"{risk.get('issue_count',0)} issue(s)")
+        for i in risk.get("issues", [])[:8]:
+            sev = i["severity"]
+            sstyle = {"critical": "red", "high": "red", "medium": "yellow", "low": "blue"}.get(sev, "white")
+            console.print(f"  [{sstyle}][{sev.upper()}][/] {i['issue']}")
+
+    ai = rep.get("ai_summary", {})
+    if ai.get("summary"):
+        console.print(Panel(ai["summary"], title=f"[bold cyan]AI Summary ({ai.get('engine','')})[/]",
+                            border_style="cyan"))
 
 
-def run_scan_sync(
-    domain: str,
-    threads: int,
-    timeout: float,
-    port_list: List[int],
-    output_dir: str,
-    enable_takeover: bool,
-    save_html: bool,
-    config: dict,
-) -> dict:
-    """Run async scan and save results."""
-    console.print(f"\n[bold yellow]>>> Scanning [cyan]{domain}[/cyan][/]")
-    logger.info(f"Scan started: {domain}")
+def _save_history(result: dict, config: dict):
+    """Persist domain/ip scans to the SQLite history DB (best-effort)."""
+    if result.get("target_type") not in ("domain", "ip"):
+        return
+    rep = result.get("report", {})
+    try:
+        db = ScanDB(config.get("db", {}).get("path", "shadowrecon.db"))
+        record = ScanRecord(
+            target=result.get("target", ""),
+            timestamp=int(time.time()),
+            dns=rep.get("dns", {}),
+            subdomains=rep.get("subdomains", []),
+            per_provider=rep.get("per_provider", {}),
+            http=rep.get("http", {}),
+            open_ports={str(k): v for k, v in rep.get("open_ports", {}).items()},
+            takeovers=rep.get("takeovers", []),
+        )
+        asyncio.run(_save_async(db, record))
+    except Exception as e:
+        logger.warning(f"could not save scan history: {e}")
 
-    engine = ScanEngine(config)
-    db_cfg = config.get("db", {})
-    db = ScanDB(db_cfg.get("path", "shadowrecon.db"))
 
-    results: dict = {}
+async def _save_async(db, record):
+    await db.init()
+    await db.save_scan(record)
+
+
+# ------------------------- scan runners -------------------------
+
+def run_registry_scan(target: str, target_type: str, config: dict, ports=None,
+                      threads=100, timeout=1.0, only=None, exclude=None,
+                      output_dir="output", flags=None):
+    label = {"domain": "domain", "ip": "host", "phone": "number",
+             "username": "username", "image": "image", "document": "document"}.get(target_type, "target")
+    console.print(f"\n[bold yellow]>>> Recon on {label} [cyan]{target}[/cyan][/]")
+    logger.info(f"Scan started: {target} ({target_type})")
+
+    eng = RegistryEngine(config)
+    result = {}
 
     async def _run():
-        nonlocal results
-        await db.init()
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-            transient=True,
-        ) as progress:
-            task = progress.add_task(description="[cyan]Running async recon...[/]", total=None)
-            results = await engine.run(
-                target=domain,
-                ports=port_list,
-                threads=threads,
-                timeout=timeout,
-                enable_takeover=enable_takeover,
-            )
+        nonlocal result
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+                      console=console, transient=True) as progress:
+            task = progress.add_task(description="[cyan]Running modules...[/]", total=None)
+
+            def cb(event, mod, res=None):
+                if event == "start":
+                    progress.update(task, description=f"[cyan]{mod.category.value}[/] · running [bold]{mod.name}[/]...")
+
+            result = await eng.run(target, target_type=target_type, ports=ports or [],
+                                   threads=threads, timeout=timeout, only=only,
+                                   exclude=exclude, flags=flags or {}, progress_cb=cb)
             progress.update(task, description="[green]Scan complete[/]")
 
-        record = ScanRecord(
-            target=domain,
-            timestamp=int(time.time()),
-            dns=results.get("dns", {}),
-            subdomains=results.get("subdomains", []),
-            per_provider=results.get("per_provider", {}),
-            http=results.get("http", {}),
-            open_ports=results.get("open_ports", {}),
-            takeovers=results.get("takeovers", []),
-        )
-        await db.save_scan(record)
-
     asyncio.run(_run())
+    _display(result)
 
-    _display_results(results, domain)
-
-    handler = OutputHandler(output_dir)
-    filename = f"{domain.replace('.', '_')}_{int(time.time())}"
-    paths = []
-    if p := handler.save_json(results, filename):
-        paths.append(p)
-    if p := handler.save_txt(results, filename):
-        paths.append(p)
-    if save_html:
-        if p := handler.save_html(results, filename):
-            paths.append(p)
-
+    # Reports
+    out_cfg = config.get("output", {})
+    if output_dir == "output" and out_cfg.get("directory"):
+        output_dir = out_cfg["directory"]
+    formats = out_cfg.get("formats", ["json", "csv", "html"])
+    filename = f"{target.replace('.', '_').replace('+', '').replace('/', '_')}_{int(time.time())}"
+    paths = build_report(result, output_dir, filename, formats)
     if paths:
-        console.print(
-            Panel(
-                f"[bold green]Saved:[/] " + " | ".join(f"[cyan]{p}[/]" for p in paths),
-                border_style="green",
-            )
-        )
-    return results
+        console.print(Panel("[bold green]Saved:[/] " + " | ".join(f"[cyan]{p}[/]" for p in paths),
+                            border_style="green"))
 
+    _save_history(result, config)
+    return result
+
+
+# ------------------------- history / compare -------------------------
 
 def _show_history(domain: str, config: dict):
-    db_cfg = config.get("db", {})
-    db = ScanDB(db_cfg.get("path", "shadowrecon.db"))
+    db = ScanDB(config.get("db", {}).get("path", "shadowrecon.db"))
 
     async def _get():
         await db.init()
@@ -308,24 +431,43 @@ def _show_history(domain: str, config: dict):
     if not scans:
         console.print(f"[{INFO_STYLE}]No scan history for {domain}[/]")
         return
-
     table = Table(title=f"Scan History — {domain}", header_style="bold magenta", border_style="dim")
-    table.add_column("ID", style="cyan", width=6)
-    table.add_column("Timestamp")
-    table.add_column("Subdomains", justify="right")
-    table.add_column("Open Ports", justify="right")
-    table.add_column("Takeovers", justify="right")
+    for col in ("ID", "Timestamp", "Subdomains", "Open Ports", "Takeovers"):
+        table.add_column(col, style="cyan" if col == "ID" else None,
+                         justify="right" if col not in ("ID", "Timestamp") else "left")
     for s in scans:
         ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(s["timestamp"]))
-        table.add_row(
-            str(s["id"]),
-            ts,
-            str(len(s.get("subdomains", []))),
-            str(len(s.get("open_ports", {}))),
-            str(len(s.get("takeovers", []))),
-        )
+        table.add_row(str(s["id"]), ts, str(len(s.get("subdomains", []))),
+                      str(len(s.get("open_ports", {}))), str(len(s.get("takeovers", []))))
     console.print(table)
 
+
+def _show_compare(id1: int, id2: int, config: dict):
+    db = ScanDB(config.get("db", {}).get("path", "shadowrecon.db"))
+
+    async def _cmp():
+        await db.init()
+        return await db.compare_scans(id1, id2)
+
+    diff = asyncio.run(_cmp())
+    if not diff:
+        console.print(f"[{ERROR_STYLE}]Could not find scans with IDs {id1} and {id2}.[/]")
+        return
+    console.print(f"\n[bold]Comparing scan [cyan]{id1}[/] → [cyan]{id2}[/][/]")
+    rows = [("[green]+ New subdomains[/]", diff["new_subdomains"]),
+            ("[red]- Removed subdomains[/]", diff["removed_subdomains"]),
+            ("[green]+ New open ports[/]", diff["new_ports"]),
+            ("[red]- Closed ports[/]", diff["closed_ports"])]
+    any_change = False
+    for label, items in rows:
+        if items:
+            any_change = True
+            console.print(f"{label} ({len(items)}): [dim]{', '.join(map(str, items))}[/]")
+    if not any_change:
+        console.print("[dim]No differences between the two scans.[/]")
+
+
+# ------------------------- interactive shell -------------------------
 
 def interactive_shell():
     print_banner()
@@ -334,206 +476,216 @@ def interactive_shell():
         show_first_run_guide()
     if readline:
         readline.set_history_length(1000)
-
-    console.print("[bold yellow]Interactive Shell[/] [dim](type 'exit' to quit, 'manual' for help)[/]")
+    console.print("[bold yellow]Interactive Shell[/] [dim](type 'manual' for help, 'exit' to quit)[/]")
 
     while True:
         try:
             cmd_input = Prompt.ask("\n[bold red]shadowrecon[/][bold white] >[/]").strip()
             if not cmd_input:
                 continue
-            if cmd_input.lower() in ("exit", "quit"):
-                console.print("[bold yellow]Shutting down... Goodbye![/]")
-                break
-            if cmd_input.lower() == "manual":
-                print_manual()
-                continue
-            if cmd_input.lower() == "clear":
-                print_banner()
-                continue
+            low = cmd_input.lower()
+            if low in ("exit", "quit"):
+                console.print("[bold yellow]Shutting down... Goodbye![/]"); break
+            if low == "manual":
+                print_manual(); continue
+            if low == "clear":
+                print_banner(); continue
+            if low == "modules":
+                _show_modules(); continue
 
             try:
                 args = shlex.split(cmd_input)
             except ValueError as e:
-                console.print(f"[{ERROR_STYLE}]Parse error:[/] {e}")
-                continue
-
+                console.print(f"[{ERROR_STYLE}]Parse error:[/] {e}"); continue
             if not args:
                 continue
-
             cmd = args[0].lower()
 
             if cmd == "scan":
                 _handle_shell_scan(args[1:], config)
-
-            elif cmd == "history":
-                if len(args) < 2:
-                    console.print(f"[{ERROR_STYLE}]Usage:[/] history <domain>")
-                else:
-                    _show_history(args[1], config)
-
+            elif cmd == "phone" and len(args) >= 2:
+                run_registry_scan(args[1], "phone", config, only=["phone", "ai_summary"])
+            elif cmd == "username" and len(args) >= 2:
+                run_registry_scan(args[1], "username", config, only=["username", "ai_summary"])
+            elif cmd == "image" and len(args) >= 2:
+                run_registry_scan(args[1], "image", config, only=["image", "ai_summary"])
+            elif cmd in ("doc", "document") and len(args) >= 2:
+                run_registry_scan(args[1], "document", config, only=["document", "ai_summary"])
+            elif cmd == "history" and len(args) >= 2:
+                _show_history(args[1], config)
+            elif cmd == "compare" and len(args) >= 3:
+                try:
+                    _show_compare(int(args[1]), int(args[2]), config)
+                except ValueError:
+                    console.print(f"[{ERROR_STYLE}]Scan IDs must be integers.[/]")
             elif "." in args[0] and not args[0].startswith("-"):
-                # Direct domain shortcut: e.g. "example.com"
                 try:
                     domain = validate_domain(args[0])
-                    run_scan_sync(domain, 100, 1.0, TOP_1000_PORTS, "output", False, False, config)
+                    run_registry_scan(domain, "domain", config, ports=TOP_1000_PORTS)
                 except ValueError as e:
                     console.print(f"[{ERROR_STYLE}]Error:[/] {e}")
             else:
-                console.print(f"[{ERROR_STYLE}]Unknown command.[/] Use [green]scan <domain>[/], [green]history <domain>[/], or [green]manual[/].")
-
+                console.print(f"[{ERROR_STYLE}]Unknown command.[/] Try [green]scan <domain>[/], "
+                              f"[green]phone <num>[/], [green]modules[/], or [green]manual[/].")
         except KeyboardInterrupt:
             console.print("\n[bold yellow]Interrupted. Type 'exit' to quit.[/]")
         except EOFError:
-            console.print("\n[bold yellow]Shutting down... Goodbye![/]")
-            break
+            console.print("\n[bold yellow]Shutting down... Goodbye![/]"); break
         except Exception as e:
             console.print(f"[{ERROR_STYLE}]Error:[/] {e}")
 
 
 def _handle_shell_scan(args: list, config: dict):
-    domain = None
-    file_path = None
-    ports_str = None
-    threads = 100
-    timeout = 1.0
-    output = "output"
-    takeover = False
-    save_html = False
-
+    domain = None; ports_str = None; threads = 100; timeout = 1.0
+    output = "output"; only = None; exclude = None; full = False; providers_str = None
+    os_fp = False
     i = 0
     while i < len(args):
         a = args[i]
         if a in ("-d", "--domain") and i + 1 < len(args):
             domain = args[i + 1]; i += 2
-        elif a in ("-f", "--file") and i + 1 < len(args):
-            file_path = args[i + 1]; i += 2
         elif a in ("-p", "--ports") and i + 1 < len(args):
             ports_str = args[i + 1]; i += 2
         elif a in ("-t", "--threads") and i + 1 < len(args):
-            try:
-                threads = validate_threads(int(args[i + 1]))
-            except ValueError as e:
-                console.print(f"[{ERROR_STYLE}]{e}[/]"); return
-            i += 2
+            threads = int(args[i + 1]); i += 2
         elif a in ("-to", "--timeout") and i + 1 < len(args):
-            try:
-                timeout = validate_timeout(float(args[i + 1]))
-            except ValueError as e:
-                console.print(f"[{ERROR_STYLE}]{e}[/]"); return
-            i += 2
+            timeout = float(args[i + 1]); i += 2
         elif a in ("-o", "--output") and i + 1 < len(args):
             output = args[i + 1]; i += 2
-        elif a == "--takeover":
-            takeover = True; i += 1
-        elif a == "--html":
-            save_html = True; i += 1
+        elif a == "--modules" and i + 1 < len(args):
+            only = [x.strip() for x in args[i + 1].split(",")]; i += 2
+        elif a == "--exclude" and i + 1 < len(args):
+            exclude = [x.strip() for x in args[i + 1].split(",")]; i += 2
+        elif a == "--providers" and i + 1 < len(args):
+            providers_str = args[i + 1]; i += 2
+        elif a == "--full":
+            full = True; i += 1
+        elif a == "--os":
+            os_fp = True; i += 1
         else:
             if not domain and not a.startswith("-"):
                 domain = a
             i += 1
 
+    if not domain:
+        console.print(f"[{ERROR_STYLE}]Provide a domain (-d).[/]"); return
     try:
+        domain = validate_domain(domain)
         port_list = validate_ports(ports_str, TOP_1000_PORTS)
+        threads = validate_threads(threads)
+        timeout = validate_timeout(timeout)
+        provider_list = validate_providers(providers_str)
     except ValueError as e:
         console.print(f"[{ERROR_STYLE}]{e}[/]"); return
 
-    domains: List[str] = []
-    if domain:
-        try:
-            domains.append(validate_domain(domain))
-        except ValueError as e:
-            console.print(f"[{ERROR_STYLE}]{e}[/]"); return
+    flags = {"os_fingerprint": os_fp}
+    if provider_list:
+        flags["providers"] = provider_list
+    if full:
+        only = [m.name for m in registry.for_target("domain")]  # everything
+    run_registry_scan(domain, "domain", config, ports=port_list, threads=threads,
+                      timeout=timeout, only=only, exclude=exclude, output_dir=output, flags=flags)
 
-    if file_path:
-        if not os.path.exists(file_path):
-            console.print(f"[{ERROR_STYLE}]File not found:[/] {file_path}"); return
-        with open(file_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    domains.append(validate_domain(line))
-                except ValueError:
-                    console.print(f"[{ERROR_STYLE}]Skipping invalid domain:[/] {line}")
 
-    if not domains:
-        console.print(f"[{ERROR_STYLE}]Provide a domain (-d) or file (-f).[/]"); return
-
-    for d in domains:
-        run_scan_sync(d, threads, timeout, port_list, output, takeover, save_html, config)
-
+# ------------------------- typer commands -------------------------
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
-    """ShadowRecon — Professional Async Recon Framework"""
+    """ShadowRecon — Enterprise OSINT & Reconnaissance Platform"""
     if ctx.invoked_subcommand is None:
         interactive_shell()
 
 
 @app.command()
 def scan(
-    domain: Optional[str] = typer.Option(None, "--domain", "-d", help="Target domain"),
-    file: Optional[str] = typer.Option(None, "--file", "-f", help="File with domains"),
-    threads: int = typer.Option(100, "--threads", "-t", help="Concurrent workers"),
-    timeout: float = typer.Option(1.0, "--timeout", "-to", help="Timeout in seconds"),
+    domain: Optional[str] = typer.Option(None, "--domain", "-d", help="Target domain / IP"),
     ports: Optional[str] = typer.Option(None, "--ports", "-p", help="Ports: 22,80 or 1-1000"),
-    output_dir: str = typer.Option("output", "--output", "-o", help="Output directory"),
-    takeover: bool = typer.Option(False, "--takeover", help="Enable takeover detection"),
-    html: bool = typer.Option(False, "--html", help="Save HTML report"),
-    config_path: str = typer.Option(_DEFAULT_CONFIG_PATH, "--config", "-c", help="Config YAML path"),
+    threads: int = typer.Option(100, "--threads", "-t"),
+    timeout: float = typer.Option(1.0, "--timeout", "-to"),
+    output_dir: str = typer.Option("output", "--output", "-o"),
+    modules: Optional[str] = typer.Option(None, "--modules", help="Only run these modules"),
+    exclude: Optional[str] = typer.Option(None, "--exclude", help="Skip these modules"),
+    providers: Optional[str] = typer.Option(None, "--providers", help="Passive provider subset"),
+    full: bool = typer.Option(False, "--full", help="Enable every module"),
+    os_fp: bool = typer.Option(False, "--os", help="OS fingerprint (needs nmap)"),
+    config_path: str = typer.Option(_DEFAULT_CONFIG_PATH, "--config", "-c"),
 ):
-    """Run a full async reconnaissance scan."""
+    """Run a full reconnaissance scan on a domain or IP."""
     print_banner(clear=False)
     config = load_config(config_path)
-
-    if not domain and not file:
-        console.print(f"[{ERROR_STYLE}]Provide --domain or --file.[/]")
-        raise typer.Exit(1)
-
+    if not domain:
+        console.print(f"[{ERROR_STYLE}]Provide --domain.[/]"); raise typer.Exit(1)
     try:
+        domain = validate_domain(domain)
         port_list = validate_ports(ports, TOP_1000_PORTS)
         threads = validate_threads(threads)
         timeout = validate_timeout(timeout)
+        provider_list = validate_providers(providers)
     except ValueError as e:
-        console.print(f"[{ERROR_STYLE}]Validation error:[/] {e}")
-        raise typer.Exit(1)
+        console.print(f"[{ERROR_STYLE}]Validation error:[/] {e}"); raise typer.Exit(1)
 
-    domains: List[str] = []
-    if domain:
-        try:
-            domains.append(validate_domain(domain))
-        except ValueError as e:
-            console.print(f"[{ERROR_STYLE}]{e}[/]")
-            raise typer.Exit(1)
-
-    if file:
-        if not os.path.exists(file):
-            console.print(f"[{ERROR_STYLE}]File not found:[/] {file}")
-            raise typer.Exit(1)
-        with open(file) as f_:
-            for line in f_:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    domains.append(validate_domain(line))
-                except ValueError:
-                    console.print(f"[{ERROR_STYLE}]Skipping invalid domain:[/] {line}")
-
-    for d in domains:
-        run_scan_sync(d, threads, timeout, port_list, output_dir, takeover, html, config)
+    only = [x.strip() for x in modules.split(",")] if modules else None
+    excl = [x.strip() for x in exclude.split(",")] if exclude else None
+    flags = {"os_fingerprint": os_fp}
+    if provider_list:
+        flags["providers"] = provider_list
+    if full:
+        load_all_modules()
+        only = [m.name for m in registry.for_target("domain")]
+    run_registry_scan(domain, "domain", config, ports=port_list, threads=threads,
+                      timeout=timeout, only=only, exclude=excl, output_dir=output_dir, flags=flags)
 
 
 @app.command()
-def history(
-    domain: str = typer.Argument(..., help="Domain to look up"),
-    config_path: str = typer.Option(_DEFAULT_CONFIG_PATH, "--config", "-c"),
-):
-    """View past scan history for a domain."""
-    config = load_config(config_path)
-    _show_history(domain, config)
+def phone(number: str = typer.Argument(..., help="Phone number (E.164 preferred)"),
+          config_path: str = typer.Option(_DEFAULT_CONFIG_PATH, "--config", "-c")):
+    """Phone number OSINT."""
+    print_banner(clear=False)
+    run_registry_scan(number, "phone", load_config(config_path), only=["phone", "ai_summary"])
+
+
+@app.command()
+def username(name: str = typer.Argument(..., help="Username to search"),
+             config_path: str = typer.Option(_DEFAULT_CONFIG_PATH, "--config", "-c")):
+    """Username OSINT across public platforms."""
+    print_banner(clear=False)
+    run_registry_scan(name, "username", load_config(config_path), only=["username", "ai_summary"])
+
+
+@app.command()
+def image(path: str = typer.Argument(..., help="Path to an image file"),
+          config_path: str = typer.Option(_DEFAULT_CONFIG_PATH, "--config", "-c")):
+    """Image OSINT (EXIF, GPS, properties, OCR)."""
+    print_banner(clear=False)
+    run_registry_scan(path, "image", load_config(config_path), only=["image", "ai_summary"])
+
+
+@app.command()
+def doc(path: str = typer.Argument(..., help="Path to a document (PDF/DOCX/PPTX/XLSX)"),
+        config_path: str = typer.Option(_DEFAULT_CONFIG_PATH, "--config", "-c")):
+    """Document metadata OSINT."""
+    print_banner(clear=False)
+    run_registry_scan(path, "document", load_config(config_path), only=["document", "ai_summary"])
+
+
+@app.command()
+def modules():
+    """List all available modules by category."""
+    _show_modules()
+
+
+@app.command()
+def history(domain: str = typer.Argument(...),
+            config_path: str = typer.Option(_DEFAULT_CONFIG_PATH, "--config", "-c")):
+    """View past scan history for a target."""
+    _show_history(domain, load_config(config_path))
+
+
+@app.command()
+def compare(id1: int = typer.Argument(...), id2: int = typer.Argument(...),
+            config_path: str = typer.Option(_DEFAULT_CONFIG_PATH, "--config", "-c")):
+    """Compare two past scans by ID."""
+    _show_compare(id1, id2, load_config(config_path))
 
 
 @app.command()

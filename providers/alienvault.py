@@ -23,6 +23,12 @@ class AlienvaultProvider(BaseProvider):
             async with session.get(
                 url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)
             ) as resp:
+                if resp.status == 429 and not self._api_key:
+                    logger.warning(
+                        "alienvault: anonymous access is rate-limited; "
+                        "set providers.alienvault.api_key in config.yaml to use this provider"
+                    )
+                    return set()
                 if resp.status != 200:
                     return set()
                 data = await resp.json(content_type=None)
