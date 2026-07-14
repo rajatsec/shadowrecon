@@ -7,19 +7,28 @@ from shadowrecon.core.base_module import BaseModule, Category, ModuleContext
 from shadowrecon.core.registry import registry
 from shadowrecon.utils.netutil import http_get
 
-# signature -> vendor. Matched (case-insensitive) against the raw header blob.
-_SIGNATURES = {
-    "cloudflare": ["cf-ray", "cloudflare", "__cfduid", "cf-cache-status"],
-    "akamai": ["akamai", "akamaighost", "x-akamai"],
-    "aws_waf / cloudfront": ["x-amz-cf-id", "x-amzn-requestid", "awselb", "cloudfront"],
-    "fastly": ["fastly", "x-fastly", "x-served-by"],
-    "imperva / incapsula": ["incap_ses", "visid_incap", "x-iinfo", "incapsula"],
-    "sucuri": ["x-sucuri-id", "x-sucuri-cache", "sucuri"],
-    "f5 big-ip": ["bigipserver", "f5-"],
-    "barracuda": ["barra_counter_session", "barracuda"],
-    "wordfence": ["wordfence"],
+# Distinctive header-NAME / cookie-NAME signatures per vendor. Matching against
+# header names (not arbitrary values) avoids false positives from vendor names
+# that merely appear in CSP/link/reference header values.
+_HEADER_SIGNATURES = {
+    "cloudflare": ["cf-ray", "cf-cache-status", "cf-request-id"],
+    "akamai": ["x-akamai-transformed", "akamai-grn", "x-akamai-request-id"],
+    "aws waf / cloudfront": ["x-amz-cf-id", "x-amz-cf-pop", "x-amzn-requestid"],
+    "fastly": ["x-fastly-request-id", "fastly-restarts"],
+    "imperva / incapsula": ["x-iinfo", "x-cdn"],
+    "sucuri": ["x-sucuri-id", "x-sucuri-cache"],
+    "f5 big-ip": ["x-waf-status"],
     "azure front door": ["x-azure-ref", "x-msedge-ref"],
-    "google cloud": ["via: 1.1 google", "gws"],
+    "vercel": ["x-vercel-id", "x-vercel-cache"],
+    "netlify": ["x-nf-request-id"],
+}
+
+# Distinctive cookie names (checked in Set-Cookie)
+_COOKIE_SIGNATURES = {
+    "cloudflare": ["__cfduid", "__cf_bm"],
+    "imperva / incapsula": ["incap_ses", "visid_incap"],
+    "f5 big-ip": ["bigipserver"],
+    "barracuda": ["barra_counter_session"],
 }
 
 
@@ -38,15 +47,25 @@ class WAFDetectModule(BaseModule):
         if not r:
             return {}
 
-        blob_parts = [f"{k}: {v}" for k, v in r.get("headers", {}).items()]
-        blob = " ".join(blob_parts).lower()
+        headers = r.get("headers", {})
+        header_names = {k.lower() for k in headers.keys()}
+        cookies = " ".join(v for k, v in headers.items() if k.lower() == "set-cookie").lower()
+        server = headers.get("Server", "") or headers.get("server", "")
+        server_l = server.lower()
 
         detected: List[str] = []
-        for vendor, sigs in _SIGNATURES.items():
-            if any(sig in blob for sig in sigs):
+        for vendor, sigs in _HEADER_SIGNATURES.items():
+            if any(sig in header_names for sig in sigs):
+                detected.append(vendor)
+        for vendor, sigs in _COOKIE_SIGNATURES.items():
+            if any(sig in cookies for sig in sigs) and vendor not in detected:
+                detected.append(vendor)
+        # High-confidence Server-header hints
+        for vendor, token in (("cloudflare", "cloudflare"), ("sucuri", "sucuri"),
+                              ("fastly", "fastly"), ("vercel", "vercel")):
+            if token in server_l and vendor not in detected:
                 detected.append(vendor)
 
-        server = r.get("headers", {}).get("Server", "")
         return {"detected": detected, "server": server} if detected else {"server": server}
 
 

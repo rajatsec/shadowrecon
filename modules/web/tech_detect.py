@@ -18,7 +18,7 @@ _TECH = {
         "Shopify": ["cdn.shopify.com", "x-shopify-stage", "shopify"],
         "Wix": ["wix.com", "x-wix-request-id"],
         "Squarespace": ["squarespace", "static1.squarespace.com"],
-        "Magento": ["mage/", "magento", "x-magento"],
+        "Magento": ["magento", "x-magento", "/skin/frontend/", "mage-cache"],
     },
     "framework": {
         "React": ["react", "_next/static", "data-reactroot"],
@@ -48,6 +48,23 @@ _TECH = {
 _GENERATOR_RE = re.compile(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\']([^"\']+)', re.I)
 
 
+def _matches(sig: str, text: str) -> bool:
+    """Substring match that won't fire inside a larger word.
+
+    e.g. 'mage/' must not match 'image/'. We reject a hit when the character
+    immediately before the signature is alphanumeric.
+    """
+    start = 0
+    while True:
+        i = text.find(sig, start)
+        if i == -1:
+            return False
+        before = text[i - 1] if i > 0 else " "
+        if not before.isalnum():
+            return True
+        start = i + 1
+
+
 class TechDetectModule(BaseModule):
     name = "tech"
     category = Category.WEB
@@ -69,7 +86,7 @@ class TechDetectModule(BaseModule):
 
         found: Dict[str, List[str]] = {}
         for category, techs in _TECH.items():
-            hits = [name for name, sigs in techs.items() if any(s in combined for s in sigs)]
+            hits = [name for name, sigs in techs.items() if any(_matches(s, combined) for s in sigs)]
             if hits:
                 found[category] = sorted(hits)
 
