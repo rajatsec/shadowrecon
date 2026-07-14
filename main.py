@@ -6,11 +6,15 @@ import warnings
 # (e.g. `python shadowrecon/main.py`) without needing PYTHONPATH.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import urllib3
 from shadowrecon.cli import app
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-warnings.filterwarnings("ignore", category=urllib3.exceptions.InsecureRequestWarning)
+# urllib3 is optional — only used to silence InsecureRequestWarning noise.
+try:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    warnings.filterwarnings("ignore", category=urllib3.exceptions.InsecureRequestWarning)
+except Exception:
+    pass
 
 if __name__ == "__main__":
     app()
